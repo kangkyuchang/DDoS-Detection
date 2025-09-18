@@ -3,15 +3,21 @@ import numpy as np
 from keras import layers, models, regularizers
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from numpy.lib.stride_tricks import sliding_window_view
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 import pickle
+from sklearn.model_selection import train_test_split
 
 
 def createWindows(data, windowSize):
     shape = (data.shape[0] - windowSize + 1, windowSize, data.shape[1])
     strides = (data.strides[0], data.strides[0], data.strides[1])
     return np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
+
+def createLabel(y, window_size):
+    return [np.bincount(window).argmax()
+            for window in sliding_window_view(y, window_size)]
 
 # df = pd.read_csv("DDoS_dataset.csv")
 # df.columns = df.columns.str.strip()
@@ -38,7 +44,7 @@ udp = pd.read_csv("separate/UDP.csv")
 
 df = pd.concat([benign, syn, udp], axis=0, ignore_index=True)
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-df = df.sort_values("Timestamp")
+df = df.sort_values("Timestamp").reset_index(drop=True)
 
 # features = ['Fwd Packet Length Mean', 'Init_Win_bytes_forward', 'Min Packet Length', 'Fwd Packet Length Min', 'Fwd Packet Length Max',
 #        'Avg Fwd Segment Size', 'ACK Flag Count', 'Max Packet Length', 'Average Packet Size', 'Subflow Fwd Bytes', 'Packet Length Mean',
@@ -52,52 +58,48 @@ df = df.sort_values("Timestamp")
 #        'SYN Flag Count', 'Active Mean', 'Idle Max', 'Active Max', 'Active Std', 'Idle Min', 'Idle Mean', 'Bwd Packet Length Std', "Label"]
 
 features = ['Total Backward Packets', 'Total Length of Fwd Packets',
-       'Fwd Packet Length Max', 'Fwd Packet Length Min',
+       'SYN Flag Count', 'Fwd Packet Length Max', 'Fwd Packet Length Min',
        'Fwd Packet Length Mean', 'Fwd Packet Length Std', 'Min Packet Length',
        'Max Packet Length', 'Packet Length Mean', 'Packet Length Std',
        'Packet Length Variance', 'ACK Flag Count', 'URG Flag Count',
        'CWE Flag Count', 'Average Packet Size', 'Avg Fwd Segment Size',
        'Avg Bwd Segment Size', 'Subflow Fwd Bytes', 'Init_Win_bytes_forward',
-       'Init_Win_bytes_backward', 'act_data_pkt_fwd', 'Label']
-
-df = df[features]
+       'Init_Win_bytes_backward', 'act_data_pkt_fwd']
 
 labelMapping = {"BENIGN" : 0, "Syn": 1, "UDP": 2}
 df["Label"] = df["Label"].map(labelMapping)
 
 df = df.replace([np.inf, -np.inf], np.nan)
 
-X = df.iloc[:, : -1].values
-y = df.iloc[:, -1].values
+X = df[features].values
+y = df["Label"].values
 
-cutoff = int(len(df) * 0.8)
-X_train = X[:cutoff]
-y_train = y[:cutoff]
-
-X_test = X[cutoff:]
-y_test = y[cutoff:]
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    stratify=y,  # 클래스 분포 유지
+    random_state=42
+)
 
 imputer = SimpleImputer(strategy="mean")
 X_train = imputer.fit_transform(X_train)
 X_test = imputer.transform(X_test)
-# X_train[["Flow Bytes/s", "Flow Packets/s"]] = imputer.fit_transform(X_train[["Flow Bytes/s", "Flow Packets/s"]])
-# X_test[["Flow Bytes/s", "Flow Packets/s"]] = imputer.transform(X_test[["Flow Bytes/s", "Flow Packets/s"]])
 
-scaler = MinMaxScaler()
+scaler = RobustScaler(quantile_range=(5, 95))
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
 
-with open('CNNModelF21/imputer.pkl', 'wb') as f:
+with open('CNNModelF21/imputer-2.pkl', 'wb') as f:
     pickle.dump(imputer, f)
-with open('CNNModelF21/scaler.pkl', 'wb') as f:
+with open('CNNModelF21/scaler-2.pkl', 'wb') as f:
     pickle.dump(scaler, f)
 
 windowSize = 30
 X_train_window = createWindows(X_train, windowSize)
 X_test_window = createWindows(X_test, windowSize)
 
-y_train = y_train[windowSize-1:]
-y_test = y_test[windowSize-1:]
+y_train = createLabel(y_train, windowSize)
+y_test = createLabel(y_test, windowSize)
 
 model = models.Sequential([
     layers.Conv1D(64, 3, activation='relu', padding="same", input_shape=(X_train_window.shape[1], X_train_window.shape[2])),
@@ -136,4 +138,4 @@ history = model.fit(
 loss, accuracy = model.evaluate(X_test_window, y_test)
 print(f'Test Accuracy: {accuracy:.4f}')
 
-model.save("CNNModelF21/CNNModelF21-Class2.h5")
+model.save("CNNModelF21/CNNModelF21-2.h5")
