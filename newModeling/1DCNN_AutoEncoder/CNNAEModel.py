@@ -38,7 +38,7 @@ def create1DCNNAutoencoder(input_shape):
     model.compile(optimizer=Adam(1e-3), loss="mse")
     return model
 
-df = pd.read_csv("../../separate/Benign.csv")
+df = pd.read_csv("../../newdata/separate/Benign.csv")
 # syn = pd.read_csv("../../separate/Syn.csv")
 # udp = pd.read_csv("../../separate/UDP.csv")
 

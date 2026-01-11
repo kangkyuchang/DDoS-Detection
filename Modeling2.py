@@ -1,110 +1,102 @@
+import keras
 import pandas as pd
 import numpy as np
+import pickle
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
+from sklearn.preprocessing import RobustScaler
 from keras import layers, models, regularizers
 from keras.optimizers import Adam
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import RobustScaler
-from sklearn.model_selection import train_test_split
-import pickle
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import matplotlib.pyplot as plt
 
+import winsplit as ws
 
-features = ['Total Backward Packets', 'Total Length of Fwd Packets',
-       'SYN Flag Count', 'Fwd Packet Length Max', 'Fwd Packet Length Min',
-       'Fwd Packet Length Mean', 'Fwd Packet Length Std', 'Min Packet Length',
-       'Max Packet Length', 'Packet Length Mean', 'Packet Length Std',
-       'Packet Length Variance', 'ACK Flag Count', 'URG Flag Count',
-       'CWE Flag Count', 'Average Packet Size', 'Avg Fwd Segment Size',
-       'Avg Bwd Segment Size', 'Subflow Fwd Bytes', 'Init_Win_bytes_forward',
-       'Init_Win_bytes_backward', 'act_data_pkt_fwd']
-
-benign = pd.read_csv("separate/Benign(M).csv")
-syn = pd.read_csv("separate/Syn.csv")
-udp = pd.read_csv("separate/UDP.csv")
-
-df = pd.concat([benign, syn, udp], axis=0, ignore_index=True)
+df = pd.read_csv("dataset/DDoSDataset.csv")
+drop_column = ['Unnamed: 0', 'Flow ID', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Protocol', 'Timestamp', "SimillarHTTP", 'Inbound']
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)
+df.replace(np.inf, np.nan, inplace=True)
+df["Label"] = df["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
+df.drop(columns=drop_column, inplace=True)
 
-label_mapping = {"BENIGN": 0, "Syn": 1, "UDP": 2}
-df["Label"] = df["Label"].map(label_mapping)
+# train, test = ws.spilt_by_label(df)
+# train["Timestamp"] = pd.to_datetime(train["Timestamp"])
+# train = train.sort_values("Timestamp").reset_index(drop=True)
+# test["Timestamp"] = pd.to_datetime(test["Timestamp"])
+# test = test.sort_values("Timestamp").reset_index(drop=True)
+# train.drop(columns=drop_column, inplace=True)
+# test.drop(columns=drop_column, inplace=True)
+# train["Label"] = train["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
+# test["Label"] = test["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
 
-split_idx = int(0.8 * len(df))
-train_df = df.iloc[:split_idx]
-test_df = df.iloc[split_idx:]
+train_max = df.max()
 
-imputer = SimpleImputer(strategy="median")
-X_train_imputed = imputer.fit_transform(train_df[features].replace([np.inf, -np.inf], np.nan))
+# train_max = train.max()
 
-scaler = RobustScaler()
-X_train_scaled = scaler.fit_transform(X_train_imputed)
+train = df.fillna(train_max)
 
-X_test_imputed = imputer.transform(test_df[features].replace([np.inf, -np.inf], np.nan))
-X_test_scaled = scaler.transform(X_test_imputed)
+# train = train.fillna(train_max)
+# test = test.fillna(train_max)
 
-with open('CNNModelF21/imputer-CL.pkl', 'wb') as f:
-    pickle.dump(imputer, f)
-with open('CNNModelF21/scaler-CL.pkl', 'wb') as f:
+train_X = train.iloc[:, :-1].values
+train_y = train.iloc[:, -1].values
+# test_X = test.iloc[:, :-1].values
+# test_y = test.iloc[:, -1].values
+
+scaler = RobustScaler(quantile_range=(5, 95))
+train_X = scaler.fit_transform(train_X)
+# test_X = scaler.transform(test_X)
+
+with open("models/lstm/max_values_lstm.pkl", "wb") as f:
+    pickle.dump(train_max, f)
+with open("models/lstm/scaler_lstm.pkl", "wb") as f:
     pickle.dump(scaler, f)
 
+window_size = 100
+train_windows_X, train_windows_y = ws.create_windows(train_X, train_y, window_size, 40)
+# test_windows_X, test_windows_y = ws.create_windows(test_X, test_y, window_size, 40)
 
-def create_windows(data, labels, window_size):
-    num_samples = data.shape[0] - window_size + 1
-    X = np.array([data[i:i+window_size] for i in range(num_samples)])
-    y = np.array([1 if 1 in labels[i:i+window_size] else 0 if 2 in labels[i:i+window_size] else 0
-                 for i in range(num_samples)])
-    return X, y
+train_windows_y = train_windows_y.reshape(-1, 1)
+# test_windows_y = test_windows_y.reshape(-1, 1)
 
+print(train_windows_X.shape, train_windows_y.shape)
 
-window_size = 30
+model = models.Sequential([
+    layers.Conv1D(64, 5, activation='relu', padding='same', input_shape=train_windows_X.shape[1:]),
+    layers.BatchNormalization(),
+    layers.MaxPooling1D(2),
+    layers.Dropout(0.2),
 
-X_train, y_train = create_windows(X_train_scaled, train_df["Label"].values, window_size)
+    layers.LSTM(128, return_sequences=True),
+    layers.LSTM(64),
 
-X_test, y_test = create_windows(X_test_scaled, test_df["Label"].values, window_size)
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.3),
+    layers.Dense(1, activation='sigmoid')
+])
 
-def create_cnn_lstm(input_shape, num_classes):
-    model = models.Sequential([
-        layers.Conv1D(64, 5, activation='relu', padding='same', input_shape=input_shape),
-        layers.BatchNormalization(),
-        layers.MaxPooling1D(2),
-        layers.Dropout(0.2),
+# early_stop = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min',restore_best_weights=True, min_delta=0.0001)
 
-        layers.LSTM(128, return_sequences=True),
-        layers.LSTM(64),
-
-        layers.Dense(128, activation='relu'),
-        layers.Dropout(0.3),
-        layers.Dense(num_classes, activation='softmax')
-    ])
-
-    model.compile(optimizer=Adam(learning_rate=1e-3),
-                  loss='sparse_categorical_crossentropy',
-                  metrics=['accuracy'])
-    return model
-
-model = create_cnn_lstm((window_size, len(features)), 3)
-
-callbacks = [
-    EarlyStopping(patience=10, restore_best_weights=True),
-    ReduceLROnPlateau(factor=0.5, patience=3),
-    ModelCheckpoint('best_model.h5', save_best_only=True)
+metrics = [
+    keras.metrics.BinaryAccuracy(name='accuracy'),
+    keras.metrics.Precision(name='precision'),
+    keras.metrics.Recall(name='recall'),
+    keras.metrics.F1Score(name='f1_score', dtype=None, threshold=0.5)
 ]
 
-history = model.fit(
-    X_train, y_train,
-    epochs=100,
-    batch_size=64,
-    validation_data=(X_test, y_test),
-    callbacks=callbacks,
+model.compile(
+    optimizer=Adam(learning_rate=1e-4),
+    loss='binary_crossentropy',
+    metrics=metrics
 )
 
-from sklearn.metrics import classification_report
+history = model.fit(
+    train_windows_X, train_windows_y,
+    epochs=2, #2
+    batch_size=32,
+    # validation_data=(test_windows_X, test_windows_y),
+    # callbacks=[early_stop]
+)
 
-y_pred = model.predict(X_test).argmax(axis=1)
+model.save("DDoS_detection_lstm.h5")
 
-loss, accuracy = model.evaluate(X_test, y_test)
-print(f'Test Accuracy: {accuracy:.4f}')
-
-print(classification_report(y_test, y_pred))
-
-model.save('CNNModelF21/CNN-LSTMModel.h5')

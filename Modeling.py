@@ -1,108 +1,90 @@
+import keras
 import pandas as pd
 import numpy as np
+import pickle
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
+from sklearn.preprocessing import RobustScaler
 from keras import layers, models, regularizers
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from numpy.lib.stride_tricks import sliding_window_view
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
-import pickle
-from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 
+import winsplit as ws
 
-def createWindows(data, windowSize):
-    shape = (data.shape[0] - windowSize + 1, windowSize, data.shape[1])
-    strides = (data.strides[0], data.strides[0], data.strides[1])
-    return np.lib.stride_tricks.as_strided(data, shape=shape, strides=strides)
+def plot_training_results(history):
+    plt.figure(figsize=(12, 5))
 
-def createLabel(y, window_size):
-    return [np.bincount(window).argmax()
-            for window in sliding_window_view(y, window_size)]
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.title('Loss Trend')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
 
-# df = pd.read_csv("DDoS_dataset.csv")
-# df.columns = df.columns.str.strip()
-# df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-# df = df.sort_values("Timestamp")
-# features = ["Bwd IAT Min", "Total Length of Bwd Packets", "Fwd IAT Min", "Max Packet Length", "Average Packet Size",
-#             "Flow IAT Max", "Fwd Packets/s", "Bwd IAT Max", "Fwd Header Length", "Bwd IAT Std",
-#             "URG Flag Count", "Bwd Header Length", "Bwd IAT Mean", "Flow IAT Std", "Subflow Bwd Bytes",
-#             "Bwd Packet Length Max", "Bwd Packet Length Mean", "Avg Bwd Segment Size", "Total Fwd Packets", "Bwd IAT Total",
-#             "Subflow Fwd Packets", "Fwd IAT Mean", "Fwd Packet Length Std", "Init_Win_bytes_backward", "Subflow Fwd Bytes",
-#             "Subflow Bwd Packets", "Fwd IAT Total", "Fwd IAT Std", "act_data_pkt_fwd", "Avg Fwd Segment Size",
-#             "Total Length of Fwd Packets", "Fwd Packet Length Max", "Fwd Packet Length Mean", "Init_Win_bytes_forward", "Fwd IAT Max", "Label"]
-# df = df[features]
-#
-# labelMapping = {"BENIGN" : 0, "DDoS": 1}
-# df["Label"] = df["Label"].map(labelMapping)
-#
-# X = df.iloc[:, :-1].values
-# y = df.iloc[:, -1].values
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['f1_score'], label='Train F1')
+    plt.plot(history.history['val_f1_score'], label='Val F1')
+    plt.title('F1-Score Trend')
+    plt.xlabel('Epochs')
+    plt.ylabel('F1-Score')
+    plt.legend()
 
-benign = pd.read_csv("separate/Benign(M).csv")
-syn = pd.read_csv("separate/Syn.csv")
-udp = pd.read_csv("separate/UDP.csv")
+    plt.tight_layout()
+    plt.show()
 
-df = pd.concat([benign, syn, udp], axis=0, ignore_index=True)
+df = pd.read_csv("dataset/DDoSDataset.csv")
+drop_column = ['Unnamed: 0', 'Flow ID', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Protocol', 'Timestamp', "SimillarHTTP", 'Inbound']
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)
+df.replace(np.inf, np.nan, inplace=True)
+df["Label"] = df["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
+df.drop(columns=drop_column, inplace=True)
 
-# features = ['Fwd Packet Length Mean', 'Init_Win_bytes_forward', 'Min Packet Length', 'Fwd Packet Length Min', 'Fwd Packet Length Max',
-#        'Avg Fwd Segment Size', 'ACK Flag Count', 'Max Packet Length', 'Average Packet Size', 'Subflow Fwd Bytes', 'Packet Length Mean',
-#        'Packet Length Variance', 'Total Length of Fwd Packets','Packet Length Std', 'URG Flag Count', 'act_data_pkt_fwd',
-#        'Bwd Header Length', 'Avg Bwd Segment Size', 'Total Backward Packets', 'Init_Win_bytes_backward', 'Fwd Packet Length Std', 'CWE Flag Count',
-#        'min_seg_size_forward', 'Bwd Packet Length Max', 'Bwd Packet Length Mean', 'Bwd Packet Length Min', 'Bwd Packets/s',
-#        'Subflow Bwd Bytes', 'Total Length of Bwd Packets', 'Flow Bytes/s', 'Bwd IAT Max', 'Bwd IAT Total', 'Bwd IAT Min', 'Bwd IAT Mean',
-#        'Fwd Header Length.1', 'Bwd IAT Std', 'Total Fwd Packets', 'Fwd PSH Flags', 'Flow Packets/s', 'Subflow Bwd Packets',
-#        'Flow IAT Min', 'Flow IAT Max', 'Subflow Fwd Packets', 'Down/Up Ratio', 'Flow IAT Mean', 'Fwd Header Length', 'Fwd IAT Min', 'Fwd IAT Total',
-#        'Fwd IAT Mean', 'RST Flag Count', 'Fwd Packets/s', 'Fwd IAT Max', 'Fwd IAT Std', 'Flow IAT Std', 'Idle Std', 'Active Min',
-#        'SYN Flag Count', 'Active Mean', 'Idle Max', 'Active Max', 'Active Std', 'Idle Min', 'Idle Mean', 'Bwd Packet Length Std', "Label"]
+# train, test = ws.spilt_by_label(df)
+# train["Timestamp"] = pd.to_datetime(train["Timestamp"])
+# train = train.sort_values("Timestamp").reset_index(drop=True)
+# test["Timestamp"] = pd.to_datetime(test["Timestamp"])
+# test = test.sort_values("Timestamp").reset_index(drop=True)
+# train.drop(columns=drop_column, inplace=True)
+# test.drop(columns=drop_column, inplace=True)
+# train["Label"] = train["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
+# test["Label"] = test["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
 
-features = ['Total Backward Packets', 'Total Length of Fwd Packets',
-       'SYN Flag Count', 'Fwd Packet Length Max', 'Fwd Packet Length Min',
-       'Fwd Packet Length Mean', 'Fwd Packet Length Std', 'Min Packet Length',
-       'Max Packet Length', 'Packet Length Mean', 'Packet Length Std',
-       'Packet Length Variance', 'ACK Flag Count', 'URG Flag Count',
-       'CWE Flag Count', 'Average Packet Size', 'Avg Fwd Segment Size',
-       'Avg Bwd Segment Size', 'Subflow Fwd Bytes', 'Init_Win_bytes_forward',
-       'Init_Win_bytes_backward', 'act_data_pkt_fwd']
+train_max = df.max()
 
-labelMapping = {"BENIGN" : 0, "Syn": 1, "UDP": 2}
-df["Label"] = df["Label"].map(labelMapping)
+# train_max = train.max()
 
-df = df.replace([np.inf, -np.inf], np.nan)
+train = df.fillna(train_max)
 
-X = df[features].values
-y = df["Label"].values
+# train = train.fillna(train_max)
+# test = test.fillna(train_max)
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y,
-    test_size=0.2,
-    stratify=y,  # 클래스 분포 유지
-    random_state=42
-)
-
-imputer = SimpleImputer(strategy="mean")
-X_train = imputer.fit_transform(X_train)
-X_test = imputer.transform(X_test)
+train_X = train.iloc[:, :-1].values
+train_y = train.iloc[:, -1].values
+# test_X = test.iloc[:, :-1].values
+# test_y = test.iloc[:, -1].values
 
 scaler = RobustScaler(quantile_range=(5, 95))
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+train_X = scaler.fit_transform(train_X)
+# test_X = scaler.transform(test_X)
 
-with open('CNNModelF21/imputer-2.pkl', 'wb') as f:
-    pickle.dump(imputer, f)
-with open('CNNModelF21/scaler-2.pkl', 'wb') as f:
+with open("models/1dcnn/max_values.pkl", "wb") as f:
+    pickle.dump(train_max, f)
+with open("models/1dcnn/scaler.pkl", "wb") as f:
     pickle.dump(scaler, f)
 
-windowSize = 30
-X_train_window = createWindows(X_train, windowSize)
-X_test_window = createWindows(X_test, windowSize)
+window_size = 100
+train_windows_X, train_windows_y = ws.create_windows(train_X, train_y, window_size, 40)
+# test_windows_X, test_windows_y = ws.create_windows(test_X, test_y, window_size, 40)
 
-y_train = createLabel(y_train, windowSize)
-y_test = createLabel(y_test, windowSize)
+train_windows_y = train_windows_y.reshape(-1, 1)
+# test_windows_y = test_windows_y.reshape(-1, 1)
+
+print(train_windows_X.shape, train_windows_y.shape)
 
 model = models.Sequential([
-    layers.Conv1D(64, 3, activation='relu', padding="same", input_shape=(X_train_window.shape[1], X_train_window.shape[2])),
+    layers.Conv1D(64, 3, activation='relu', padding="same", input_shape=train_windows_X.shape[1:]),
     layers.BatchNormalization(),
     layers.MaxPooling1D(2),
     layers.Dropout(0.3),
@@ -115,27 +97,31 @@ model = models.Sequential([
     layers.Flatten(),
     layers.Dense(256, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
     layers.Dropout(0.5),
-    layers.Dense(len(np.unique(y_train)), activation='softmax')
+    layers.Dense(1, activation='sigmoid')
 ])
 
-early_stop = EarlyStopping(monitor='val_loss', patience=5, verbose=1)
-lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, verbose=1)
+# early_stop = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min',restore_best_weights=True, min_delta=0.0001)
+
+metrics = [
+    keras.metrics.BinaryAccuracy(name='accuracy'),
+    keras.metrics.Precision(name='precision'),
+    keras.metrics.Recall(name='recall'),
+    keras.metrics.F1Score(name='f1_score', dtype=None, threshold=0.5)
+]
 
 model.compile(
     optimizer=Adam(learning_rate=1e-4),
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy']
+    loss='binary_crossentropy',
+    metrics=metrics
 )
 
 history = model.fit(
-    X_train_window, y_train,
-    epochs=50,
+    train_windows_X, train_windows_y,
+    epochs=13, #13
     batch_size=32,
-    validation_data=(X_test_window, y_test),
-    callbacks=[early_stop, lr_scheduler]
+    # validation_data=(test_windows_X, test_windows_y)
+    # callbacks=[early_stop]
 )
 
-loss, accuracy = model.evaluate(X_test_window, y_test)
-print(f'Test Accuracy: {accuracy:.4f}')
+model.save("DDoS_detection.h5")
 
-model.save("CNNModelF21/CNNModelF21-2.h5")

@@ -6,8 +6,8 @@ from sklearn.impute import SimpleImputer
 from keras import layers, models, regularizers
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, classification_report
 
 def create_cnn_lstm(input_shape):
     model = models.Sequential([
@@ -42,104 +42,111 @@ def pad(data, window_size):
             chunk[-1] = pd.concat([chunk[-1], padding], ignore_index=True)
         return chunk
 
-def create_windows(data, labels, window_size):
+def create_windows(data, labels, window_size, labeling_ratio=40):
+    threshold = 1 if labeling_ratio == 0 else int(window_size * (labeling_ratio / 100))
+    print('threshold', threshold)
     num_samples = data.shape[0] - window_size + 1
     X = np.array([data[i:i+window_size] for i in range(num_samples)])
-    y = np.array([1 if 1 in labels[i:i+window_size] else 0 for i in range(num_samples)])
+    y = np.array([
+        1 if np.sum(labels[i:i + window_size] == 1) >= threshold else 0
+        for i in range(num_samples)
+    ])
     return X, y
 
-benign = pd.read_csv("../../separate/Benign.csv")
-syn = pd.read_csv("../../separate/Syn.csv")
-udp = pd.read_csv("../../separate/UDP.csv")
-
-df = pd.concat([benign, syn, udp], axis=0, ignore_index=True)
+df = pd.read_csv("../../DDoSdataset.csv")
+df.columns = df.columns.str.strip()
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)
+df["Label"] = df["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
 
-features = ['Total Length of Fwd Packets', 'Total Length of Bwd Packets',
-       'Fwd Packet Length Min', 'Fwd Packet Length Mean', 'SYN Flag Count',
-       'Bwd Packet Length Max', 'Bwd Packet Length Mean', 'Fwd PSH Flags',
-       'Bwd Packets/s', 'Min Packet Length', 'Packet Length Mean',
-       'RST Flag Count', 'ACK Flag Count', 'URG Flag Count', 'CWE Flag Count',
-       'Average Packet Size', 'Avg Fwd Segment Size', 'Avg Bwd Segment Size',
-       'Subflow Fwd Bytes', 'Subflow Bwd Bytes', 'Init_Win_bytes_forward',
-       'Init_Win_bytes_backward']
+evaluate_df = pd.read_csv("../../DDoS_evaluation.csv")
+evaluate_df.columns = evaluate_df.columns.str.strip()
+evaluate_df["Timestamp"] = pd.to_datetime(evaluate_df["Timestamp"])
+evaluate_df = evaluate_df.sort_values("Timestamp").reset_index(drop=True)
+evaluate_df = evaluate_df.replace([np.inf, -np.inf], np.nan)
+evaluate_df["Label"] = evaluate_df["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
 
-label_mapping = {"BENIGN" : 0, "Syn": 1, "UDP": 1}
-df["Label"] = df["Label"].map(label_mapping)
+features = ['Init_Win_bytes_forward', 'Flow Packets/s', 'Bwd Packet Length Mean', 'Packet Length Variance',
+            'Fwd Header Length', 'Max Packet Length', 'Fwd Packet Length Min', 'Packet Length Mean',
+            'Subflow Fwd Bytes', 'Bwd IAT Min', 'Packet Length Std', 'Bwd Header Length', 'Average Packet Size',
+            'Flow IAT Std', 'Fwd Packets/s', 'Total Length of Bwd Packets', 'Total Backward Packets', 'ACK Flag Count',
+            'Fwd IAT Max', 'Bwd Packet Length Max', 'Fwd Packet Length Mean']
 
-groups = df.groupby(pd.Grouper(key="Timestamp", freq="1min"))
-
-window_size = 100
-
-processed_data = []
-for name, group in groups:
-    result = pad(group, window_size)
-    if isinstance(result, list):
-        processed_data.extend(result)
-    else:
-        processed_data.append(result)
-
-final_df = pd.concat(processed_data, ignore_index=True)
-
-train = final_df.iloc[:131000]
-test = final_df.iloc[131000:]
-
-X_train = train[features].values
-y_train = train["Label"].values
-X_test = test[features].values
-y_test = test["Label"].values
-
-# X = df[features].values
-# y = df["Label"].values
-
-# X_train, X_test, y_train, y_test = train_test_split(
-#     X, y,
-#     test_size=0.1,
-#     shuffle=False
-# )
+X_train = df[features].values
+y_train = df["Label"].values
+X_eval = evaluate_df[features].values
+y_eval = evaluate_df["Label"].values
 
 imputer = SimpleImputer(strategy="median")
 X_train = imputer.fit_transform(X_train)
-X_test = imputer.transform(X_test)
+X_eval = imputer.transform(X_eval)
 
 scaler = RobustScaler(quantile_range=(5, 95))
 X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+X_eval = scaler.transform(X_eval)
 
-with open('imputer.pkl-pre-ReFeature', 'wb') as f:
+with open('../../2025_10_20/WS_5/lstm-imputer.pkl', 'wb') as f:
     pickle.dump(imputer, f)
-with open('scaler.pkl-pre-ReFeature', 'wb') as f:
+with open('../../2025_10_20/WS_5/lstm-scaler.pkl', 'wb') as f:
     pickle.dump(scaler, f)
 
+window_size = 5
 X_train, y_train = create_windows(X_train, y_train, window_size)
-X_test, y_test = create_windows(X_test, y_test, window_size)
+X_eval, y_eval = create_windows(X_eval, y_eval, window_size)
 
-model = create_cnn_lstm((window_size, len(features)))
+model = models.Sequential([
+        layers.Conv1D(64, 5, activation='relu', padding='same', input_shape=(X_train.shape[1], X_train.shape[2])),
+        layers.BatchNormalization(),
+        layers.MaxPooling1D(2),
+        layers.Dropout(0.2),
 
-callbacks = [
-    EarlyStopping(patience=10, restore_best_weights=True),
-    ReduceLROnPlateau(factor=0.5, patience=3),
-    ModelCheckpoint('1DCNN-LSTM-pre-ReFeature-Best.h5', save_best_only=True)
-]
+        layers.LSTM(128, return_sequences=True),
+        layers.LSTM(64),
+
+        layers.Dense(128, activation='relu'),
+        layers.Dropout(0.3),
+        layers.Dense(1, activation='sigmoid')
+    ])
+
+early_stop = EarlyStopping(monitor='val_loss', patience=5, verbose=1)
+lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, verbose=1)
+
+model.compile(
+    optimizer=Adam(learning_rate=1e-3),
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
 
 history = model.fit(
     X_train, y_train,
     epochs=50,
-    batch_size=64,
-    validation_data=(X_test, y_test),
-    callbacks=callbacks,
+    batch_size=32,
+    # validation_data=(X_test, y_test),
+    callbacks=[early_stop, lr_scheduler, ModelCheckpoint('../../2025_10_20/WS_5/1D_CNN_LSTM.h5', save_best_only=True)]
 )
 
-from sklearn.metrics import classification_report
+y_pred_proba = model.predict(X_eval)
+y_pred = (y_pred_proba > 0.5).astype(int)
 
-y_pred = model.predict(X_test)
+print("### 분류 평가 지표 ###")
 
-loss, accuracy = model.evaluate(X_test, y_test)
-print(f'Test Accuracy: {accuracy:.4f}')
+# 1. 정확도 (Accuracy)
+accuracy = accuracy_score(y_eval, y_pred)
+print(f"정확도 (Accuracy): {accuracy:.4f}")
 
-model.save("1DCNN-LSTM-ReFeature-pre.h5")
+precision = precision_score(y_eval, y_pred, average='binary')
+recall = recall_score(y_eval, y_pred, average='binary')
+f1 = f1_score(y_eval, y_pred, average='binary')
+print(f"정밀도 (Precision): {precision:.4f}")
+print(f"재현율 (Recall): {recall:.4f}")
+print(f"F1-점수 (F1-Score): {f1:.4f}")
 
-y_pred_binary = (y_pred > 0.5).astype(int)
+roc_auc = roc_auc_score(y_eval, y_pred_proba)
+print(f"ROC AUC: {roc_auc:.4f}")
 
-print(classification_report(y_test, y_pred_binary))
+conf_matrix = confusion_matrix(y_eval, y_pred)
+print("\n혼동 행렬 (Confusion Matrix):")
+print(conf_matrix)
+
+print("\n분류 보고서 (Classification Report):")
+print(classification_report(y_eval, y_pred))
