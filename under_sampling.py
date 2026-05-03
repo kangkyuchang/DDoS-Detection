@@ -35,7 +35,7 @@ def minibatch_kmeans_undersample(X, n_clusters):
     expanded_indices = sorted(expanded_indices)
     return expanded_indices
 
-fileName = ["LDAP", "MSSQL", "NetBIOS", "Portmap", "Syn", "UDP", "UDPLag"]
+fileName = ["Syn", "UDP"]
 for name in fileName:
     filePath = f"dataset/03-11/{name}.csv"
     data = pd.read_csv(filePath)
