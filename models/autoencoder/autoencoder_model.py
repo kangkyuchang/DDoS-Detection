@@ -30,7 +30,7 @@ def create1DCNNAutoencoder(input_shape):
     model.compile(optimizer=Adam(1e-4), loss="mse")
     return model
 
-df = pd.read_csv("dataset/BENIGN.csv")
+df = pd.read_csv("../../dataset/BENIGN.csv")
 drop_column = ['Unnamed: 0', 'Flow ID', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Protocol', 'Timestamp', "SimillarHTTP", 'Inbound']
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)

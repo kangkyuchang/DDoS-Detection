@@ -14,9 +14,9 @@ def create_windows(data, labels, window_size):
     y = np.array([1 if 1 in labels[i:i+window_size] else 0 for i in range(num_samples)])
     return X, y
 
-benign = pd.read_csv("newdata/separate/Benign.csv")
-syn = pd.read_csv("newdata/separate/Syn.csv")
-udp = pd.read_csv("newdata/separate/UDP.csv")
+benign = pd.read_csv("../dataset/newdata/separate/Benign.csv")
+syn = pd.read_csv("../dataset/newdata/separate/Syn.csv")
+udp = pd.read_csv("../dataset/newdata/separate/UDP.csv")
 
 df = pd.concat([benign, syn, udp], axis=0, ignore_index=True)
 df = df.drop("SimillarHTTP", axis=1)

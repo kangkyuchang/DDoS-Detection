@@ -1,6 +1,9 @@
 dataset
-newdata
-models
 newModeling
+visualization
+__pycache__
 *.csv
 *.h5
+*.pkl
+.idea
+.DS_Store

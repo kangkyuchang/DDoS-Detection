@@ -59,7 +59,7 @@ df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)
 df["Label"] = df["Label"].map(lambda x: 0 if x == "BENIGN" else 1)
 
-evaluate_df = pd.read_csv("../../DDoS_evaluation.csv")
+evaluate_df = pd.read_csv("../../dataset/DDoS_evaluation.csv")
 evaluate_df.columns = evaluate_df.columns.str.strip()
 evaluate_df["Timestamp"] = pd.to_datetime(evaluate_df["Timestamp"])
 evaluate_df = evaluate_df.sort_values("Timestamp").reset_index(drop=True)

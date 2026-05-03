@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 import winsplit as ws
 
-df = pd.read_csv("dataset/DDoSDataset.csv")
+df = pd.read_csv("../../dataset/DDoSDataset.csv")
 drop_column = ['Unnamed: 0', 'Flow ID', 'Source IP', 'Source Port', 'Destination IP', 'Destination Port', 'Protocol', 'Timestamp', "SimillarHTTP", 'Inbound']
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values("Timestamp").reset_index(drop=True)
@@ -47,9 +47,9 @@ scaler = RobustScaler(quantile_range=(5, 95))
 train_X = scaler.fit_transform(train_X)
 # test_X = scaler.transform(test_X)
 
-with open("models/lstm/max_values_lstm.pkl", "wb") as f:
+with open("max_values_lstm.pkl", "wb") as f:
     pickle.dump(train_max, f)
-with open("models/lstm/scaler_lstm.pkl", "wb") as f:
+with open("scaler_lstm.pkl", "wb") as f:
     pickle.dump(scaler, f)
 
 window_size = 100

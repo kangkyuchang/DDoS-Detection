@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import winsplit as ws
 from keras import models
 
-df = pd.read_csv("dataset/separate/ATTACK_UDP.csv")
+df = pd.read_csv("../dataset/separate/ATTACK_UDP.csv")
 df.columns = df.columns.str.strip()
 # df = df[df["Label"] == "BENIGN"]
 df = df[:80000]
@@ -21,18 +21,18 @@ df.drop(columns=drop_column, inplace=True)
 X = df.iloc[:, :-1]
 y = df.iloc[:, -1].values
 
-with open('models/autoencoder/max_values_autoencoder.pkl', 'rb') as f:
+with open('autoencoder/max_values_autoencoder.pkl', 'rb') as f:
     max_values = pickle.load(f)
 
 X = X.fillna(max_values)
 X = X.values
 
-with open('models/autoencoder/scaler_autoencoder.pkl', 'rb') as f:
+with open('autoencoder/scaler_autoencoder.pkl', 'rb') as f:
     scaler = pickle.load(f)
 
 X = scaler.transform(X)
 
-with open('models/autoencoder/scaler_minmax_autoencoder.pkl', 'rb') as f:
+with open('autoencoder/scaler_minmax_autoencoder.pkl', 'rb') as f:
     scaler_minmax = pickle.load(f)
 
 X = scaler_minmax.transform(X)
@@ -43,7 +43,7 @@ y = y.reshape(-1, 1)
 
 # model = models.load_model("DDoS_detection_autoencoder.h5")
 
-model = models.load_model("models/autoencoder/DDoS_detection_autoencoder.h5",
+model = models.load_model("autoencoder/DDoS_detection_autoencoder.h5",
                           custom_objects={'mse': keras.metrics.mean_squared_error})
 
 y_pred_proba = model.predict(X)
